@@ -2,7 +2,7 @@
 
 # --- Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.2.0-multi"
+VERSION="0.2.0-test"
 ALIAS_FILE="$HOME/.linux_buddy_aliases"
 LOG_FILE="/tmp/linux_buddy.log"
 
