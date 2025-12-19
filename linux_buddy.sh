@@ -344,7 +344,7 @@ ask_ai() {
     fi
 }
 
-# --- Start ---
+# --- Start ----
 detect_distro
 check_deps
 
