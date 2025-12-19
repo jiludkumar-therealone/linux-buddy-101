@@ -2,11 +2,15 @@
 
 # --- Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.2.0-test"
-ALIAS_FILE="$HOME/.linux_buddy_aliases"
+VERSION="0.3.1-alpha"
+CONFIG_DIR="$HOME/.config/linux-buddy"
+CONFIG_FILE="$CONFIG_DIR/config"
 LOG_FILE="/tmp/linux_buddy.log"
 
-# --- Distro Detection Logic ---
+# Ensure config directory exists
+mkdir -p "$CONFIG_DIR"
+
+# --- Distro Detection ---
 detect_distro() {
     if [ -f /etc/os-release ]; then
         . /etc/os-release
@@ -16,126 +20,128 @@ detect_distro() {
     fi
 }
 
-# Generic Package Manager Wrapper
-# Usage: run_pkg_cmd "update" or "upgrade" or "install <pkg>"
-run_pkg_cmd() {
-    local action=$1
-    case $DISTRO in
-        ubuntu|debian|kali|pop|linuxmint)
-            case $action in
-                update)  sudo apt-get update ;;
-                upgrade) sudo apt-get dist-upgrade -y ;;
-                clean)   sudo apt-get autoremove -y && sudo apt-get clean ;;
-                install) sudo apt-get install -y "${@:2}" ;;
-            esac
-            ;;
-        fedora|rhel|centos)
-            case $action in
-                update)  sudo dnf check-update ;;
-                upgrade) sudo dnf upgrade -y ;;
-                clean)   sudo dnf autoremove -y ;;
-                install) sudo dnf install -y "${@:2}" ;;
-            esac
-            ;;
-        arch|manjaro|endeavouros)
-            case $action in
-                update)  sudo pacman -Sy ;;
-                upgrade) sudo pacman -Syu --noconfirm ;;
-                clean)   sudo pacman -Sc --noconfirm ;;
-                install) sudo pacman -S --noconfirm "${@:2}" ;;
-            esac
-            ;;
-        opensuse*)
-            case $action in
-                update)  sudo zypper refresh ;;
-                upgrade) sudo zypper update -y ;;
-                clean)   sudo zypper clean ;;
-                install) sudo zypper install -y "${@:2}" ;;
-            esac
-            ;;
-        *)
-            msg_box "Unsupported Distro" "Sorry, I don't know how to handle $DISTRO yet!"
-            return 1
-            ;;
-    esac
-}
-
-# --- UI Functions ---
-msg_box() { whiptail --title "$1" --msgbox "$2" 12 65; }
-confirm() { whiptail --title "$1" --yesno "$2" 12 65; }
-
-# --- Core Logic ---
-check_sudo() {
-    echo "Authenticating for system tasks..."
-    if ! sudo -v; then
-        msg_box "Authentication Failed" "Administrator permissions are required."
-        exit 1
-    fi
-    ( while true; do sudo -v; sleep 60; done ) &
-    SUDO_PID=$!
-    trap 'kill $SUDO_PID' EXIT
-}
-
-run_with_retry() {
-    local cmd="$1"
-    local description="$2"
-    local attempt=1
-    while [ $attempt -le 2 ]; do
-        echo "Running: $description..."
-        if eval "$cmd" > "$LOG_FILE" 2>&1; then return 0; fi
-        msg_box "Retry" "$description failed. Retrying..."
-        ((attempt++))
+# --- Dependencies Check & Auto-Install ---
+# We install these BEFORE the main menu so the app works perfectly
+check_deps() {
+    local missing_deps=()
+    for cmd in whiptail curl jq neofetch; do
+        if ! command -v $cmd &> /dev/null; then
+            missing_deps+=("$cmd")
+        fi
     done
-    msg_box "Error" "Failed after 2 attempts. See $LOG_FILE"
-    return 1
-}
 
-# --- Features ---
-update_system() {
-    msg_box "System Update" "Detected Distro: $DISTRO\n\nWe will now refresh your app list and install updates."
-    run_with_retry "run_pkg_cmd update" "Refreshing repositories" && \
-    run_with_retry "run_pkg_cmd upgrade" "Installing updates" && \
-    run_with_retry "run_pkg_cmd clean" "Cleaning up" && \
-    msg_box "Finished" "Your $DISTRO system is up to date!"
-}
-
-setup_shortcuts() {
-    if confirm "Install Shortcuts?" "Make terminal easier?\n\n- 'install <pkg>' instead of long commands\n- 'whatsmyip' for network info"; then
-        touch "$ALIAS_FILE"
-        # Distro-aware alias
-        case $DISTRO in
-            arch*) echo "alias install='sudo pacman -S'" > "$ALIAS_FILE" ;;
-            fedora*) echo "alias install='sudo dnf install'" > "$ALIAS_FILE" ;;
-            *) echo "alias install='sudo apt install'" > "$ALIAS_FILE" ;;
-        esac
-        echo "alias whatsmyip='hostname -I | awk \"{print \$1}\"'" >> "$ALIAS_FILE"
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        echo "Linux Buddy needs to install some tools to work: ${missing_deps[*]}"
+        echo "Please enter your password to allow this setup."
         
-        [[ ! $(grep "linux_buddy_aliases" "$HOME/.bashrc") ]] && echo -e "\n[[ -f $ALIAS_FILE ]] && . $ALIAS_FILE" >> "$HOME/.bashrc"
-        msg_box "Success" "Shortcuts installed. Restart terminal to use them!"
+        case $DISTRO in
+            ubuntu|debian|kali|pop|linuxmint)
+                sudo apt-get update && sudo apt-get install -y "${missing_deps[@]}" ;;
+            fedora|rhel|centos)
+                sudo dnf install -y "${missing_deps[@]}" ;;
+            arch|manjaro)
+                sudo pacman -S --noconfirm "${missing_deps[@]}" ;;
+            *)
+                echo "Unknown distro. Please manually install: ${missing_deps[*]}"
+                exit 1
+                ;;
+        esac
     fi
 }
 
-# --- Main Menu ---
-main_menu() {
-    detect_distro
-    while true; do
-        CHOICE=$(whiptail --title "$APP_NAME ($DISTRO)" --menu "Main Menu" 16 65 6 \
-            "1" "Full System Update" \
-            "2" "Install Beginner Shortcuts" \
-            "3" "AI Helper (Coming Soon)" \
-            "4" "Show System Info" \
-            "5" "Exit" 3>&1 1>&2 2>&3)
-
-        case $CHOICE in
-            1) update_system ;;
-            2) setup_shortcuts ;;
-            3) msg_box "AI" "This feature requires a Gemini API key. Integration coming in v0.3!" ;;
-            4) clear; [ -x "$(command -v neofetch)" ] && neofetch || uname -a; read -p "Press Enter..." ;;
-            5) exit 0 ;;
-            *) exit 0 ;;
-        esac
-    done
+# --- API Key Guided Setup ---
+get_api_key() {
+    if [ -f "$CONFIG_FILE" ]; then
+        API_KEY=$(cat "$CONFIG_FILE")
+    else
+        whiptail --title "AI Setup Required" --msgbox "To use the AI Assistant, you need a free Gemini API Key.\n\nI will now show you the link to get one for free." 12 65
+        
+        # provide the link clearly
+        whiptail --title "Step 1: Get Your Key" --msgbox "1. Go to: https://aistudio.google.com/app/apikey\n2. Sign in with Google\n3. Click 'Create API key'\n4. Copy the key." 14 70
+        
+        API_KEY=$(whiptail --title "Step 2: Save Your Key" --passwordbox "Paste your Gemini API Key here (it will stay hidden):" 12 65 3>&1 1>&2 2>&3)
+        
+        if [ -n "$API_KEY" ]; then
+            echo "$API_KEY" > "$CONFIG_FILE"
+            chmod 600 "$CONFIG_FILE"
+            msg_box "Setup Complete" "Your AI Brain is now connected!"
+        else
+            msg_box "Setup Skipped" "AI features will be disabled until a key is provided."
+        fi
+    fi
 }
 
-check_sudo
-main_menu
+# --- UI Helpers ---
+msg_box() { whiptail --title "$1" --msgbox "$2" 14 70; }
+
+# --- App Store ---
+app_store() {
+    local APP=$(whiptail --title "Popular Apps" --menu "Choose an app to install:" 16 65 5 \
+        "vlc" "Universal Media Player" \
+        "git" "Version control for programmers" \
+        "htop" "Interactive process viewer" \
+        "btop" "Modern colorful system monitor" \
+        "Back" "Return to main menu" 3>&1 1>&2 2>&3)
+
+    if [ "$APP" != "Back" ] && [ -n "$APP" ]; then
+        echo "Installing $APP..."
+        case $DISTRO in
+            ubuntu|debian) sudo apt-get install -y "$APP" ;;
+            fedora) sudo dnf install -y "$APP" ;;
+            arch) sudo pacman -S --noconfirm "$APP" ;;
+        esac
+        msg_box "Installation" "$APP task completed!"
+    fi
+}
+
+# --- AI Brain ---
+ask_ai() {
+    get_api_key
+    if [ -z "$API_KEY" ]; then return; fi
+
+    local user_query=$(whiptail --title "AI Assistant" --inputbox "What do you want to do in Linux? (e.g., 'Check my disk space')" 10 70 3>&1 1>&2 2>&3)
+    if [ -z "$user_query" ]; then return; fi
+
+    # Temporary message while waiting
+    echo "Querying Gemini AI... please wait."
+    
+    local response=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}" \
+        -H 'Content-Type: application/json' \
+        -d "{
+            \"contents\": [{
+                \"parts\": [{
+                    \"text\": \"Role: Expert Linux Tutor. Task: Explain how to do '$user_query' for a total beginner. Format: One short sentence of explanation, then the exact bash command on the next line. Use no markdown code blocks.\"
+                }]
+            }]
+        }")
+
+    local ai_text=$(echo "$response" | jq -r '.candidates[0].content.parts[0].text' 2>/dev/null)
+    
+    if [ "$ai_text" != "null" ] && [ -n "$ai_text" ]; then
+        msg_box "Buddy's Answer" "$ai_text"
+    else
+        msg_box "Connection Error" "Failed to get an answer. Please check your internet or API key."
+    fi
+}
+
+# --- Start ---
+detect_distro
+check_deps # Automatically installs neofetch, jq, etc.
+
+while true; do
+    CHOICE=$(whiptail --title "$APP_NAME v$VERSION ($DISTRO)" --menu "Main Menu" 16 70 5 \
+        "1" "System Maintenance (Update & Upgrade)" \
+        "2" "Install Popular Apps" \
+        "3" "Ask AI Assistant" \
+        "4" "Quick System Summary" \
+        "5" "Exit" 3>&1 1>&2 2>&3)
+
+    case $CHOICE in
+        1) sudo apt-get update && sudo apt-get upgrade -y || sudo dnf upgrade -y || sudo pacman -Syu --noconfirm ;;
+        2) app_store ;;
+        3) ask_ai ;;
+        4) clear; neofetch; read -p "Press Enter to return to menu..." ;;
+        5) exit 0 ;;
+        *) exit 0 ;;
+    esac
+done
