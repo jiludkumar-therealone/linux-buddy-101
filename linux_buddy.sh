@@ -2,10 +2,10 @@
 
 # --- Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.3.1-alpha"
+VERSION="0.3.2-alpha"
 CONFIG_DIR="$HOME/.config/linux-buddy"
 CONFIG_FILE="$CONFIG_DIR/config"
-LOG_FILE="/tmp/linux_buddy.log"
+SCRIPT_PATH=$(realpath "$0")
 
 # Ensure config directory exists
 mkdir -p "$CONFIG_DIR"
@@ -21,7 +21,6 @@ detect_distro() {
 }
 
 # --- Dependencies Check & Auto-Install ---
-# We install these BEFORE the main menu so the app works perfectly
 check_deps() {
     local missing_deps=()
     for cmd in whiptail curl jq neofetch; do
@@ -49,14 +48,44 @@ check_deps() {
     fi
 }
 
+# --- Shortcuts & Aliases ---
+install_hello_shortcut() {
+    local shell_rc=""
+    if [[ "$SHELL" == *"zsh"* ]]; then
+        shell_rc="$HOME/.zshrc"
+    else
+        shell_rc="$HOME/.bashrc"
+    fi
+
+    if grep -q "alias hello=" "$shell_rc"; then
+        msg_box "Shortcut Exists" "The 'hello' shortcut is already installed in $shell_rc"
+    else
+        echo "alias hello='$SCRIPT_PATH'" >> "$shell_rc"
+        msg_box "Shortcut Installed" "Success! You can now launch this app by typing 'hello' in any NEW terminal window."
+    fi
+}
+
+# --- Uninstaller ---
+uninstall_buddy() {
+    if whiptail --title "Uninstall Linux Buddy" --yesno "This will remove your API key, configuration, and the 'hello' shortcut. Are you sure?" 12 65; then
+        # Remove config directory
+        rm -rf "$CONFIG_DIR"
+        
+        # Remove aliases from .bashrc and .zshrc
+        sed -i '/alias hello=/d' "$HOME/.bashrc" 2>/dev/null
+        sed -i '/alias hello=/d' "$HOME/.zshrc" 2>/dev/null
+        
+        msg_box "Uninstalled" "Linux Buddy components removed. You can now manually delete the script file if you wish."
+        exit 0
+    fi
+}
+
 # --- API Key Guided Setup ---
 get_api_key() {
     if [ -f "$CONFIG_FILE" ]; then
         API_KEY=$(cat "$CONFIG_FILE")
     else
         whiptail --title "AI Setup Required" --msgbox "To use the AI Assistant, you need a free Gemini API Key.\n\nI will now show you the link to get one for free." 12 65
-        
-        # provide the link clearly
         whiptail --title "Step 1: Get Your Key" --msgbox "1. Go to: https://aistudio.google.com/app/apikey\n2. Sign in with Google\n3. Click 'Create API key'\n4. Copy the key." 14 70
         
         API_KEY=$(whiptail --title "Step 2: Save Your Key" --passwordbox "Paste your Gemini API Key here (it will stay hidden):" 12 65 3>&1 1>&2 2>&3)
@@ -74,7 +103,7 @@ get_api_key() {
 # --- UI Helpers ---
 msg_box() { whiptail --title "$1" --msgbox "$2" 14 70; }
 
-# --- App Store ---
+# --- Features ---
 app_store() {
     local APP=$(whiptail --title "Popular Apps" --menu "Choose an app to install:" 16 65 5 \
         "vlc" "Universal Media Player" \
@@ -94,7 +123,6 @@ app_store() {
     fi
 }
 
-# --- AI Brain ---
 ask_ai() {
     get_api_key
     if [ -z "$API_KEY" ]; then return; fi
@@ -102,7 +130,6 @@ ask_ai() {
     local user_query=$(whiptail --title "AI Assistant" --inputbox "What do you want to do in Linux? (e.g., 'Check my disk space')" 10 70 3>&1 1>&2 2>&3)
     if [ -z "$user_query" ]; then return; fi
 
-    # Temporary message while waiting
     echo "Querying Gemini AI... please wait."
     
     local response=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}" \
@@ -126,22 +153,26 @@ ask_ai() {
 
 # --- Start ---
 detect_distro
-check_deps # Automatically installs neofetch, jq, etc.
+check_deps
 
 while true; do
-    CHOICE=$(whiptail --title "$APP_NAME v$VERSION ($DISTRO)" --menu "Main Menu" 16 70 5 \
+    CHOICE=$(whiptail --title "$APP_NAME v$VERSION ($DISTRO)" --menu "Main Menu" 18 75 7 \
         "1" "System Maintenance (Update & Upgrade)" \
         "2" "Install Popular Apps" \
         "3" "Ask AI Assistant" \
-        "4" "Quick System Summary" \
-        "5" "Exit" 3>&1 1>&2 2>&3)
+        "4" "Install 'hello' Shortcut" \
+        "5" "Quick System Summary" \
+        "6" "Uninstall Linux Buddy" \
+        "7" "Exit" 3>&1 1>&2 2>&3)
 
     case $CHOICE in
         1) sudo apt-get update && sudo apt-get upgrade -y || sudo dnf upgrade -y || sudo pacman -Syu --noconfirm ;;
         2) app_store ;;
         3) ask_ai ;;
-        4) clear; neofetch; read -p "Press Enter to return to menu..." ;;
-        5) exit 0 ;;
+        4) install_hello_shortcut ;;
+        5) clear; neofetch; read -p "Press Enter to return to menu..." ;;
+        6) uninstall_buddy ;;
+        7) exit 0 ;;
         *) exit 0 ;;
     esac
 done
