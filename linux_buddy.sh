@@ -18,18 +18,18 @@ if ! sudo -n true 2>/dev/null; then
     clear
 fi
 
-# Keep-alive sudo
+# Keep-alive sudo in background
 ( while true; do sudo -n -v >/dev/null 2>&1; sleep 60; done ) &
 SUDO_PID=$!
 trap 'kill $SUDO_PID 2>/dev/null' EXIT
 
 # --- 1. Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.5.4-alpha"
+VERSION="0.5.5-alpha"
 CONFIG_DIR="$HOME/.config/linux-buddy"
 CONFIG_FILE="$CONFIG_DIR/config"
 
-# Robust path detection
+# Robust path detection (Works even with underscores or the occasional space)
 raw_path="${BASH_SOURCE[0]:-$0}"
 SCRIPT_PATH=$(readlink -f "$raw_path")
 
@@ -135,18 +135,17 @@ install_hello_shortcut() {
     [[ "$SHELL" == *"zsh"* ]] && shell_rc="$HOME/.zshrc" || shell_rc="$HOME/.bashrc"
     source_cmd="source $shell_rc"
 
-    # NUCLEAR CLEANUP: Remove ANY line that mentions 'hello'
-    # This cleans up the "Code Hub" error lines left by previous attempts
+    # Scrub old entries to avoid conflicts
     cp "$shell_rc" "${shell_rc}.bak"
     grep -v "hello" "${shell_rc}.bak" > "$shell_rc"
 
-    # Write the new space-proof function
+    # Save as a Function (Most robust method)
     echo "" >> "$shell_rc"
     echo "# Linux Buddy Shortcut" >> "$shell_rc"
     echo "hello() { \"$SCRIPT_PATH\" \"\$@\"; }" >> "$shell_rc"
     
-    whiptail --title "Nuclear Cleanup Applied" --inputbox \
-    "I've scrubbed old broken lines and added a space-proof function. Copy (Ctrl+C) and run this to finish:" \
+    whiptail --title "Shortcut Installed" --inputbox \
+    "I've linked 'hello' to your script. Copy (Ctrl+C) and run this to finish activation:" \
     12 70 "$source_cmd" 3>&1 1>&2 2>&3
 }
 
