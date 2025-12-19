@@ -2,7 +2,7 @@
 
 # --- Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.4.1-alpha"
+VERSION="0.4.2-alpha"
 CONFIG_DIR="$HOME/.config/linux-buddy"
 CONFIG_FILE="$CONFIG_DIR/config"
 SCRIPT_PATH=$(realpath "$0")
@@ -20,23 +20,30 @@ detect_distro() {
     fi
 }
 
-# --- Permissions Check ---
-# Keeps sudo active so the TUI doesn't flicker when asking for passwords
+# --- Permissions Check (Fixed Password Logic) ---
+# This version "breaks out" of whiptail to handle the password safely
 check_sudo() {
     if ! sudo -n true 2>/dev/null; then
-        echo "Linux Buddy needs administrator permissions for some tasks."
+        clear
+        echo "--------------------------------------------------------"
+        echo "  [ SECURITY ] Administrator permissions required"
+        echo "  Linux Buddy needs to verify your identity to continue."
+        echo "--------------------------------------------------------"
+        echo ""
         if ! sudo -v; then
-            echo "Authentication failed. Exiting."
+            echo ""
+            echo "Authentication failed. Exiting to keep your system safe."
             exit 1
         fi
+        clear
     fi
-    # Keep-alive sudo in the background
+    # Keep-alive sudo in the background so you aren't asked again
     ( while true; do sudo -v; sleep 60; done ) &
     SUDO_PID=$!
     trap 'kill $SUDO_PID 2>/dev/null' EXIT
 }
 
-# --- Dependencies Check & Auto-Install ---
+# --- Dependencies Check ---
 check_deps() {
     local missing_deps=()
     for cmd in whiptail curl jq neofetch; do
@@ -46,7 +53,8 @@ check_deps() {
     done
 
     if [ ${#missing_deps[@]} -gt 0 ]; then
-        echo "Linux Buddy needs to install some tools to work: ${missing_deps[*]}"
+        check_sudo
+        echo "Installing tools: ${missing_deps[*]}..."
         case $DISTRO in
             ubuntu|debian|kali|pop|linuxmint)
                 sudo apt-get update && sudo apt-get install -y "${missing_deps[@]}" ;;
@@ -65,6 +73,7 @@ check_deps() {
 # --- Unified Package Runner ---
 run_pkg_cmd() {
     local action=$1
+    check_sudo
     case $DISTRO in
         ubuntu|debian|kali|pop|linuxmint)
             case $action in
@@ -88,6 +97,41 @@ run_pkg_cmd() {
             esac
             ;;
     esac
+}
+
+# --- AI Brain Setup (Redesigned) ---
+get_api_key() {
+    if [ -f "$CONFIG_FILE" ]; then
+        API_KEY=$(cat "$CONFIG_FILE")
+    else
+        whiptail --title "AI Setup" --msgbox "You need a free Gemini API Key.\n\nGet one here: https://aistudio.google.com/app/apikey" 10 65
+        # We use a passwordbox here because it's just a paste, not a system auth
+        API_KEY=$(whiptail --title "Paste Key" --passwordbox "Paste your key (it will be hidden):" 10 65 3>&1 1>&2 2>&3)
+        if [ -n "$API_KEY" ]; then
+            echo "$API_KEY" > "$CONFIG_FILE"
+            chmod 600 "$CONFIG_FILE"
+        fi
+    fi
+}
+
+ask_ai() {
+    get_api_key
+    if [ -z "$API_KEY" ]; then return; fi
+    local user_query
+    user_query=$(whiptail --title "AI Assistant" --inputbox "What would you like to do in Linux?" 10 70 3>&1 1>&2 2>&3)
+    [ -z "$user_query" ] && return
+    
+    # Simple non-graphical progress indicator
+    echo "Consulting the AI brain..."
+    
+    local response
+    response=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}" \
+        -H 'Content-Type: application/json' \
+        -d "{\"contents\": [{\"parts\": [{\"text\": \"Role: Expert Linux Tutor. Task: Explain '$user_query' in one short sentence, then the exact command. No markdown.\"}]}]}")
+    
+    local ai_text
+    ai_text=$(echo "$response" | jq -r '.candidates[0].content.parts[0].text' 2>/dev/null)
+    msg_box "Buddy's Answer" "${ai_text:-Error: Could not reach Gemini. Verify your API key or internet.}"
 }
 
 # --- Shortcuts & Aliases ---
@@ -151,6 +195,7 @@ system_doctor() {
             ;;
         "Fix Packages")
             if [[ "$DISTRO" == "ubuntu" || "$DISTRO" == "debian" ]]; then
+                check_sudo
                 sudo dpkg --configure -a && sudo apt-get install -f
                 msg_box "Done" "Fix attempt finished."
             else
@@ -183,44 +228,13 @@ app_store() {
     fi
 }
 
-# --- AI Brain ---
-get_api_key() {
-    if [ -f "$CONFIG_FILE" ]; then
-        API_KEY=$(cat "$CONFIG_FILE")
-    else
-        whiptail --title "AI Setup" --msgbox "Get a free key at: https://aistudio.google.com/app/apikey" 10 65
-        API_KEY=$(whiptail --passwordbox "Paste your Gemini API Key here:" 10 65 3>&1 1>&2 2>&3)
-        if [ -n "$API_KEY" ]; then
-            echo "$API_KEY" > "$CONFIG_FILE"
-            chmod 600 "$CONFIG_FILE"
-        fi
-    fi
-}
-
-ask_ai() {
-    get_api_key
-    if [ -z "$API_KEY" ]; then return; fi
-    local user_query
-    user_query=$(whiptail --title "AI Assistant" --inputbox "What would you like to do in Linux?" 10 70 3>&1 1>&2 2>&3)
-    [ -z "$user_query" ] && return
-    
-    echo "Consulting the AI brain..."
-    local response
-    response=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}" \
-        -H 'Content-Type: application/json' \
-        -d "{\"contents\": [{\"parts\": [{\"text\": \"Role: Expert Linux Tutor. Task: Explain '$user_query' in one short sentence, then the exact command. No markdown.\"}]}]}")
-    
-    local ai_text
-    ai_text=$(echo "$response" | jq -r '.candidates[0].content.parts[0].text' 2>/dev/null)
-    msg_box "Buddy's Answer" "${ai_text:-Error: Could not reach Gemini. Verify your API key.}"
-}
-
 # --- UI Helpers ---
 msg_box() { whiptail --title "$1" --msgbox "$2" 14 70; }
 
 # --- Main Logic ---
 detect_distro
 check_deps
+# Final auth check before showing the main menu
 check_sudo
 
 while true; do
