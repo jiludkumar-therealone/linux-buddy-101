@@ -18,18 +18,18 @@ if ! sudo -n true 2>/dev/null; then
     clear
 fi
 
+# Keep-alive sudo
 ( while true; do sudo -n -v >/dev/null 2>&1; sleep 60; done ) &
 SUDO_PID=$!
 trap 'kill $SUDO_PID 2>/dev/null' EXIT
 
 # --- 1. Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.5.3-alpha"
+VERSION="0.5.4-alpha"
 CONFIG_DIR="$HOME/.config/linux-buddy"
 CONFIG_FILE="$CONFIG_DIR/config"
 
-# --- THE SLEDGEHAMMER PATH FIX ---
-# This detects the absolute path and wraps it specifically for shell functions
+# Robust path detection
 raw_path="${BASH_SOURCE[0]:-$0}"
 SCRIPT_PATH=$(readlink -f "$raw_path")
 
@@ -135,28 +135,25 @@ install_hello_shortcut() {
     [[ "$SHELL" == *"zsh"* ]] && shell_rc="$HOME/.zshrc" || shell_rc="$HOME/.bashrc"
     source_cmd="source $shell_rc"
 
-    # Aggressive Cleanup: Remove any old alias OR function attempts
-    sed -i '/alias hello=/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
-    sed -i '/hello() {/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
-    sed -i '/# Linux Buddy Shortcut/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
+    # NUCLEAR CLEANUP: Remove ANY line that mentions 'hello'
+    # This cleans up the "Code Hub" error lines left by previous attempts
+    cp "$shell_rc" "${shell_rc}.bak"
+    grep -v "hello" "${shell_rc}.bak" > "$shell_rc"
 
-    # 1. Write as a Function (The Professional Fix for paths with spaces)
+    # Write the new space-proof function
     echo "" >> "$shell_rc"
     echo "# Linux Buddy Shortcut" >> "$shell_rc"
     echo "hello() { \"$SCRIPT_PATH\" \"\$@\"; }" >> "$shell_rc"
     
-    clear
-    whiptail --title "Path Space Fix Applied" --inputbox \
-    "I've switched to a 'Shell Function' which handles spaces perfectly. Copy (Ctrl+C) and run this to finish:" \
+    whiptail --title "Nuclear Cleanup Applied" --inputbox \
+    "I've scrubbed old broken lines and added a space-proof function. Copy (Ctrl+C) and run this to finish:" \
     12 70 "$source_cmd" 3>&1 1>&2 2>&3
 }
 
 uninstall_buddy() {
     if whiptail --title "Uninstall" --yesno "Remove your API key and the 'hello' shortcut?" 10 60; then
         rm -rf "$CONFIG_DIR"
-        sed -i '/# Linux Buddy Shortcut/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
-        sed -i '/alias hello=/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
-        sed -i '/hello() {/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
+        sed -i '/hello/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
         msg_box "Uninstalled" "Components removed."
         exit 0
     fi
