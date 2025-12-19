@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 # --- 0. TERMINAL-FIRST AUTHENTICATION ---
-# This runs immediately when you type ./linux_buddy.sh or 'hello'
 if ! sudo -n true 2>/dev/null; then
     clear
     echo "========================================================"
@@ -9,7 +8,6 @@ if ! sudo -n true 2>/dev/null; then
     echo "========================================================"
     echo " To manage your system and apps, I need your password.  "
     echo ""
-    # Standard terminal sudo prompt - 100% stable
     if ! sudo -v; then
         echo ""
         echo " [!] Authentication failed. Exiting."
@@ -20,18 +18,20 @@ if ! sudo -n true 2>/dev/null; then
     clear
 fi
 
-# Keep-alive sudo in the background so you are never asked again
-# We redirect output to /dev/null to prevent TUI flickering
 ( while true; do sudo -n -v >/dev/null 2>&1; sleep 60; done ) &
 SUDO_PID=$!
 trap 'kill $SUDO_PID 2>/dev/null' EXIT
 
 # --- 1. Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.4.4-alpha"
+VERSION="0.5.3-alpha"
 CONFIG_DIR="$HOME/.config/linux-buddy"
 CONFIG_FILE="$CONFIG_DIR/config"
-SCRIPT_PATH=$(realpath "$0")
+
+# --- THE SLEDGEHAMMER PATH FIX ---
+# This detects the absolute path and wraps it specifically for shell functions
+raw_path="${BASH_SOURCE[0]:-$0}"
+SCRIPT_PATH=$(readlink -f "$raw_path")
 
 mkdir -p "$CONFIG_DIR"
 
@@ -130,16 +130,25 @@ ask_ai() {
 
 install_hello_shortcut() {
     local shell_rc=""
+    local source_cmd=""
+    
     [[ "$SHELL" == *"zsh"* ]] && shell_rc="$HOME/.zshrc" || shell_rc="$HOME/.bashrc"
+    source_cmd="source $shell_rc"
 
-    if grep -q "alias hello=" "$shell_rc"; then
-        msg_box "Shortcut Exists" "The 'hello' shortcut is already in $shell_rc"
-    else
-        echo "" >> "$shell_rc"
-        echo "# Linux Buddy Shortcut" >> "$shell_rc"
-        echo "alias hello='$SCRIPT_PATH'" >> "$shell_rc"
-        msg_box "Shortcut Installed" "Success! To start using it, run:\nsource $shell_rc"
-    fi
+    # Aggressive Cleanup: Remove any old alias OR function attempts
+    sed -i '/alias hello=/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
+    sed -i '/hello() {/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
+    sed -i '/# Linux Buddy Shortcut/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
+
+    # 1. Write as a Function (The Professional Fix for paths with spaces)
+    echo "" >> "$shell_rc"
+    echo "# Linux Buddy Shortcut" >> "$shell_rc"
+    echo "hello() { \"$SCRIPT_PATH\" \"\$@\"; }" >> "$shell_rc"
+    
+    clear
+    whiptail --title "Path Space Fix Applied" --inputbox \
+    "I've switched to a 'Shell Function' which handles spaces perfectly. Copy (Ctrl+C) and run this to finish:" \
+    12 70 "$source_cmd" 3>&1 1>&2 2>&3
 }
 
 uninstall_buddy() {
@@ -147,6 +156,7 @@ uninstall_buddy() {
         rm -rf "$CONFIG_DIR"
         sed -i '/# Linux Buddy Shortcut/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
         sed -i '/alias hello=/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
+        sed -i '/hello() {/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
         msg_box "Uninstalled" "Components removed."
         exit 0
     fi
@@ -207,7 +217,7 @@ while true; do
         "2" "System Doctor (Fix & Check Health)" \
         "3" "Ask AI Assistant (English to Bash)" \
         "4" "App Store (Install Popular Apps)" \
-        "5" "Install 'hello' Shortcut" \
+        "5" "Install/Fix 'hello' Shortcut" \
         "6" "Quick System Summary (Neofetch)" \
         "7" "Uninstall Linux Buddy" \
         "8" "Exit" 3>&1 1>&2 2>&3)
