@@ -34,8 +34,9 @@ trap 'kill $SUDO_PID 2>/dev/null' EXIT
 
 # --- 1. Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.9.2-alpha" 
+VERSION="0.9.3-alpha"
 CONFIG_DIR="$HOME/.config/linux-buddy"
+CONFIG_FILE="$CONFIG_DIR/config"
 SCRIPT_PATH=$(readlink -f "${BASH_SOURCE[0]:-$0}")
 
 mkdir -p "$CONFIG_DIR"
@@ -226,15 +227,16 @@ install_hello_shortcut() {
 
 system_doctor() {
     local task
-    task=$(whiptail --title "System Doctor" --menu "Diagnostic tools:" 18 70 9 \
+    task=$(whiptail --title "System Doctor" --menu "Diagnostic tools:" 18 70 10 \
         "Speed Test" "Check Internet Download/Upload speeds" \
+        "Fix Windows/Linux Time" "Fix clock sync issues for dual-booters" \
+        "Restart Desktop UI" "Restart GNOME/KDE if taskbar/windows freeze" \
         "Check Internet" "Test your connection status (Ping)" \
         "Clean Disk" "Remove temporary files" \
         "Clean Orphan Packages" "Deep sweep for all unused system dependencies" \
         "Clear System Logs" "Clear old systemd journal logs (Save GBs!)" \
         "Fix Packages" "Repair broken installs or stale database locks" \
-        "Restart Audio" "Fix sound issues (PulseAudio/Pipewire)" \
-        "Restart Bluetooth" "Reset the Bluetooth service" \
+        "Restart Audio/BT" "Reset sound and bluetooth services" \
         "Back" "Return to main menu" 3>&1 1>&2 2>&3)
 
     case $task in
@@ -258,6 +260,19 @@ system_doctor() {
             fi
             echo ""
             read -p "Press [Enter] to return..." ;;
+        "Fix Windows/Linux Time")
+            sudo timedatectl set-local-rtc 1 --adjust-system-clock
+            msg_box "Success" "Hardware clock set to Local Time. Windows and Linux should now agree on the time." ;;
+        "Restart Desktop UI")
+            echo -e "${YELLOW}Restarting Desktop Shell... Screens will flicker.${NC}"
+            if command -v gnome-shell > /dev/null; then
+                busctl --user call org.gnome.Shell /org.gnome.Shell org.gnome.Shell Eval s "Main.restart()" || gnome-shell --replace &
+            elif command -v plasmashell > /dev/null; then
+                plasmashell --replace &
+            elif command -v xfce4-panel > /dev/null; then
+                xfce4-panel -r && xfwm4 --replace &
+            fi
+            msg_box "UI Restarted" "Desktop environment command sent." ;;
         "Check Internet") ping -c 3 8.8.8.8 >/dev/null 2>&1 && msg_box "Status" "ONLINE" || msg_box "Status" "OFFLINE" ;;
         "Clean Disk") run_pkg_cmd clean && msg_box "Success" "Caches cleared." ;;
         "Clean Orphan Packages")
@@ -274,20 +289,53 @@ system_doctor() {
                     sudo dpkg --configure -a && sudo apt-get install -f
                     ;;
                 arch|manjaro)
-                    # Common Arch fix: Remove stale lock and sync
                     [ -f /var/lib/pacman/db.lck ] && sudo rm -f /var/lib/pacman/db.lck
                     sudo pacman -Syyu --noconfirm
                     ;;
                 fedora|rhel|centos)
                     sudo dnf clean all && sudo dnf check
                     ;;
-                *)
-                    echo -e "${RED}Distro not explicitly supported for automated repair.${NC}"
-                    ;;
             esac
             msg_box "Done" "Fix attempt finished for $DISTRO." ;;
-        "Restart Audio") systemctl --user restart pulseaudio || systemctl --user restart pipewire && msg_box "Audio" "Sound services restarted." ;;
-        "Restart Bluetooth") sudo systemctl restart bluetooth && msg_box "Bluetooth" "Bluetooth service reset." ;;
+        "Restart Audio/BT")
+            systemctl --user restart pulseaudio || systemctl --user restart pipewire
+            sudo systemctl restart bluetooth
+            msg_box "Success" "Audio and Bluetooth services reset." ;;
+    esac
+}
+
+distro_special_tools() {
+    local task
+    task=$(whiptail --title "$DISTRO Specific Tools" --menu "Expert optimizations for your OS:" 16 75 5 \
+        "Fedora: Install Media Codecs" "Fix MP4/H.264 playback issues" \
+        "Arch: Update Fast Mirrors" "Refresh and sort mirrors by speed" \
+        "Ubuntu: Fix PPA Errors" "Clean up broken third-party repositories" \
+        "Back" "Return to main menu" 3>&1 1>&2 2>&3)
+
+    case $task in
+        "Fedora: Install Media Codecs")
+            if [[ "$DISTRO" == "fedora" ]]; then
+                sudo dnf groupinstall "Multimedia" "Sound and Video" --with-optional -y
+                msg_box "Done" "Multimedia codecs installed."
+            else
+                msg_box "Mismatch" "This tool is specifically for Fedora."
+            fi ;;
+        "Arch: Update Fast Mirrors")
+            if [[ "$DISTRO" == "arch" || "$DISTRO" == "manjaro" ]]; then
+                sudo pacman -S --noconfirm reflector
+                sudo reflector --latest 10 --sort rate --save /etc/pacman.d/mirrorlist
+                msg_box "Done" "Mirrors updated with the top 10 fastest servers."
+            else
+                msg_box "Mismatch" "This tool is for Arch/Manjaro."
+            fi ;;
+        "Ubuntu: Fix PPA Errors")
+            if [[ "$DISTRO" == "ubuntu" || "$DISTRO" == "linuxmint" || "$DISTRO" == "pop" ]]; then
+                sudo apt-get install --reinstall ca-certificates
+                sudo apt-get update
+                msg_box "Done" "Certs reinstalled and repos updated."
+            else
+                msg_box "Mismatch" "This tool is for Ubuntu-based systems."
+            fi ;;
     esac
 }
 
@@ -403,28 +451,22 @@ uninstaller_utility() {
             fi
             
             # Layered Safety Deep Clean Prompt
-            # Layer 1: Guard against generic or core-system names
             if [[ ${#choice} -lt 3 || "$choice" =~ ^(bin|etc|lib|var|usr|sys|root|home|boot|dev)$ ]]; then
                 msg_box "Deep Clean Skipped" "The app name '$choice' is too generic or matches core system paths. Skipping deep clean for safety."
             else
                 if whiptail --title "Deep Clean" --yesno "Would you like to search for and remove leftover configuration files in your Home folder?" 10 65; then
                     echo -e "${YELLOW}Hunting for leftover configuration folders...${NC}"
-                    
-                    # Layer 2: Targeted Search in specific non-critical hidden folders
                     local scan_targets=("$HOME/.config" "$HOME/.local/share" "$HOME/.cache")
                     local config_found=""
                     for target in "${scan_targets[@]}"; do
                         if [ -d "$target" ]; then
-                            # Find hidden folders specifically matching the app name within standard locations
                             local match=$(find "$target" -maxdepth 2 -name "*$choice*" -type d 2>/dev/null)
                             [ -n "$match" ] && config_found+="$match"$'\n'
                         fi
                     done
 
                     if [ -n "$config_found" ]; then
-                        # Layer 3: Final User Verification
                         if whiptail --title "Confirm Delete" --yesno "Found these leftover folders. Delete them?\n\n$config_found" 15 70; then
-                            # Sudo is NOT used here for home directory deletion to prevent accidentally touching system files
                             echo "$config_found" | xargs rm -rf
                             msg_box "Deep Clean Complete" "Leftover data removed safely."
                         fi
@@ -487,42 +529,44 @@ detect_distro
 check_deps
 
 while true; do
-    CHOICE=$(whiptail --title "$APP_NAME v$VERSION ($DISTRO)" --menu "Main Menu" 22 78 11 \
+    CHOICE=$(whiptail --title "$APP_NAME v$VERSION ($DISTRO)" --menu "Main Menu" 22 78 12 \
         "1" "System Maintenance (Update & Upgrade)" \
         "2" "System Doctor (Fix Audio, Speed Test, etc.)" \
-        "3" "Power Tools (SSH, Git, Visual Search)" \
-        "4" "System Information Suite (IP, Disk, OS)" \
-        "5" "Ask AI Assistant (English to Bash)" \
-        "6" "App Store & Smart Uninstaller" \
-        "7" "Install/Fix 'hello' Shortcut" \
-        "8" "Quick System Summary (Neofetch)" \
-        "9" "Uninstall Linux Buddy" \
-        "10" "Exit" 3>&1 1>&2 2>&3)
+        "3" "Distro-Specific Toolbox (Expert Fixes)" \
+        "4" "Power Tools (SSH, Git, Visual Search)" \
+        "5" "System Information Suite (IP, Disk, OS)" \
+        "6" "Ask AI Assistant (English to Bash)" \
+        "7" "App Store & Smart Uninstaller" \
+        "8" "Install/Fix 'hello' Shortcut" \
+        "9" "Quick System Summary (Neofetch)" \
+        "10" "Uninstall Linux Buddy" \
+        "11" "Exit" 3>&1 1>&2 2>&3)
 
     case $CHOICE in
         1) 
             echo -e "${YELLOW}Starting system maintenance...${NC}"
             run_pkg_cmd update && msg_box "Success" "Updated!" ;;
         2) system_doctor ;;
-        3) power_tools ;;
-        4) system_info_suite ;;
-        5) ask_ai ;;
-        6) app_store ;;
-        7) install_hello_shortcut ;;
-        8) 
+        3) distro_special_tools ;;
+        4) power_tools ;;
+        5) system_info_suite ;;
+        6) ask_ai ;;
+        7) app_store ;;
+        8) install_hello_shortcut ;;
+        9) 
             clear
             echo -e "${BOLD}${CYAN}========================================================${NC}"
             echo -e " ${BOLD}System Summary${NC}"
             echo -e "${BOLD}${CYAN}========================================================${NC}"
             neofetch; echo ""; read -p "Press [Enter] to return..." ;;
-        9) 
+        10) 
             if whiptail --yesno "Remove everything?" 10 60; then 
                 rm -rf "$CONFIG_DIR"
                 sed -i '/hello/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
                 echo -e "${RED}Uninstalled Linux Buddy successfully.${NC}"
                 exit 0
             fi ;;
-        10) exit 0 ;;
+        11) exit 0 ;;
         *) exit 0 ;;
     esac
 done
