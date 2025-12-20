@@ -25,7 +25,7 @@ trap 'kill $SUDO_PID 2>/dev/null' EXIT
 
 # --- 1. Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.7.0-alpha" # UPDATED: Starting with Alpha for the first release!
+VERSION="0.8.1-alpha" 
 CONFIG_DIR="$HOME/.config/linux-buddy"
 CONFIG_FILE="$CONFIG_DIR/config"
 
@@ -171,39 +171,30 @@ install_hello_shortcut() {
     12 70 "$source_cmd" 3>&1 1>&2 2>&3
 }
 
-uninstall_buddy() {
-    if whiptail --title "Uninstall" --yesno "Remove your API key and the 'hello' shortcut?" 10 60; then
-        rm -rf "$CONFIG_DIR"
-        sed -i '/hello/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
-        msg_box "Uninstalled" "Components removed."
-        exit 0
-    fi
-}
-
 system_doctor() {
     local task
-    task=$(whiptail --title "System Doctor" --menu "Diagnostic tools:" 16 70 5 \
+    task=$(whiptail --title "System Doctor" --menu "Diagnostic tools:" 16 70 6 \
         "Check Internet" "Test your connection status" \
         "Clean Disk" "Remove temporary files" \
         "Fix Packages" "Fix broken installs (Ubuntu/Debian)" \
-        "Health Report" "Check RAM and CPU load" \
+        "Restart Audio" "Fix sound issues (PulseAudio/Pipewire)" \
+        "Restart Bluetooth" "Reset the Bluetooth service" \
         "Back" "Return to main menu" 3>&1 1>&2 2>&3)
 
     case $task in
         "Check Internet") ping -c 3 8.8.8.8 >/dev/null 2>&1 && msg_box "Status" "ONLINE" || msg_box "Status" "OFFLINE" ;;
         "Clean Disk") run_pkg_cmd clean && msg_box "Success" "Caches cleared." ;;
         "Fix Packages") 
-            if [[ "$DISTRO" == "ubuntu" || "$DISTRO" == "debian" ]]; then
-                sudo dpkg --configure -a && sudo apt-get install -f
-                msg_box "Done" "Fix attempt finished."
-            else
-                msg_box "Unsupported" "This tool is for Ubuntu/Debian."
-            fi
+            sudo dpkg --configure -a && sudo apt-get install -f
+            msg_box "Done" "Fix attempt finished."
             ;;
-        "Health Report")
-            local ram=$(free -h | awk '/^Mem:/ {print $3 "/" $2}')
-            local load=$(uptime | awk -F'load average:' '{ print $2 }')
-            msg_box "Health" "RAM Usage: $ram\nCPU Load: $load"
+        "Restart Audio")
+            systemctl --user restart pulseaudio || systemctl --user restart pipewire
+            msg_box "Audio" "Sound services restarted."
+            ;;
+        "Restart Bluetooth")
+            sudo systemctl restart bluetooth
+            msg_box "Bluetooth" "Bluetooth service has been reset."
             ;;
     esac
 }
@@ -243,6 +234,50 @@ system_info_suite() {
     esac
 }
 
+power_tools() {
+    local task
+    task=$(whiptail --title "Power User Tools" --menu "Advanced automations:" 16 75 6 \
+        "Setup GitHub Identity" "Set your Git Name & Email" \
+        "Generate SSH Key" "Create a key for GitHub/GitLab" \
+        "Find Huge Files" "Find files larger than 100MB" \
+        "Fix Permissions" "Fix 'Read Only' Home folder issues" \
+        "Back" "Return to main menu" 3>&1 1>&2 2>&3)
+
+    case $task in
+        "Setup GitHub Identity")
+            local name=$(whiptail --inputbox "Enter your Full Name:" 10 60 3>&1 1>&2 2>&3)
+            local email=$(whiptail --inputbox "Enter your Email:" 10 60 3>&1 1>&2 2>&3)
+            if [ -n "$name" ] && [ -n "$email" ]; then
+                git config --global user.name "$name"
+                git config --global user.email "$email"
+                msg_box "Success" "Git identity set to: $name <$email>"
+            fi
+            ;;
+        "Generate SSH Key")
+            if [ -f "$HOME/.ssh/id_ed25519" ]; then
+                msg_box "Key Exists" "You already have an SSH key at ~/.ssh/id_ed25519"
+            else
+                local email=$(whiptail --inputbox "Enter email for the key:" 10 60 3>&1 1>&2 2>&3)
+                ssh-keygen -t ed25519 -C "$email" -N "" -f "$HOME/.ssh/id_ed25519"
+                msg_box "Success" "Key generated! Look in ~/.ssh/id_ed25519.pub"
+            fi
+            whiptail --title "Copy your Public Key" --inputbox "Paste this into GitHub settings:" 12 75 "$(cat $HOME/.ssh/id_ed25519.pub)" 3>&1 1>&2 2>&3
+            ;;
+        "Find Huge Files")
+            clear
+            echo "Searching for files larger than 100MB in your Home folder..."
+            echo "--------------------------------------------------------"
+            find "$HOME" -type f -size +100M -exec ls -lh {} \; 2>/dev/null | awk '{ print $5, $9 }'
+            echo "--------------------------------------------------------"
+            read -p "Press Enter to return..."
+            ;;
+        "Fix Permissions")
+            sudo chown -R "$USER":"$USER" "$HOME"
+            msg_box "Fixed" "Ownership of your home folder has been reset to you."
+            ;;
+    esac
+}
+
 custom_install() {
     local target
     target=$(whiptail --title "Custom App Search" --inputbox "Type the name of the app you want to install:" 10 60 3>&1 1>&2 2>&3)
@@ -255,7 +290,7 @@ custom_install() {
                 msg_box "Success" "$target has been installed!"
             fi
         else
-            msg_box "Not Found" "I couldn't find '$target' in your repositories. Check the spelling or try another name."
+            msg_box "Not Found" "I couldn't find '$target' in your repositories."
         fi
     fi
 }
@@ -302,27 +337,29 @@ detect_distro
 check_deps
 
 while true; do
-    CHOICE=$(whiptail --title "$APP_NAME v$VERSION ($DISTRO)" --menu "Main Menu" 20 78 10 \
+    CHOICE=$(whiptail --title "$APP_NAME v$VERSION ($DISTRO)" --menu "Main Menu" 22 78 11 \
         "1" "System Maintenance (Update & Upgrade)" \
-        "2" "System Doctor (Fix & Check Health)" \
-        "3" "System Information Suite (IP, Disk, OS)" \
-        "4" "Ask AI Assistant (English to Bash)" \
-        "5" "App Store (TUI, Apps & Snaps)" \
-        "6" "Install/Fix 'hello' Shortcut" \
-        "7" "Quick System Summary (Neofetch)" \
-        "8" "Uninstall Linux Buddy" \
-        "9" "Exit" 3>&1 1>&2 2>&3)
+        "2" "System Doctor (Fix Audio, BT, Internet)" \
+        "3" "Power Tools (SSH, Git, Permissions)" \
+        "4" "System Information Suite (IP, Disk, OS)" \
+        "5" "Ask AI Assistant (English to Bash)" \
+        "6" "App Store (TUI, Apps & Snaps)" \
+        "7" "Install/Fix 'hello' Shortcut" \
+        "8" "Quick System Summary (Neofetch)" \
+        "9" "Uninstall Linux Buddy" \
+        "10" "Exit" 3>&1 1>&2 2>&3)
 
     case $CHOICE in
         1) run_pkg_cmd update && msg_box "Success" "System updated!" ;;
         2) system_doctor ;;
-        3) system_info_suite ;;
-        4) ask_ai ;;
-        5) app_store ;;
-        6) install_hello_shortcut ;;
-        7) clear; neofetch; echo ""; read -p "Press Enter to return to menu..." ;;
-        8) uninstall_buddy ;;
-        9) exit 0 ;;
+        3) power_tools ;;
+        4) system_info_suite ;;
+        5) ask_ai ;;
+        6) app_store ;;
+        7) install_hello_shortcut ;;
+        8) clear; neofetch; echo ""; read -p "Press Enter to return to menu..." ;;
+        9) if whiptail --title "Uninstall" --yesno "Remove everything?" 10 60; then rm -rf "$CONFIG_DIR"; sed -i '/hello/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null; exit 0; fi ;;
+        10) exit 0 ;;
         *) exit 0 ;;
     esac
 done
