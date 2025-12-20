@@ -34,7 +34,7 @@ trap 'kill $SUDO_PID 2>/dev/null' EXIT
 
 # --- 1. Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.8.8-alpha" 
+VERSION="0.9.1-alpha" 
 CONFIG_DIR="$HOME/.config/linux-buddy"
 SCRIPT_PATH=$(readlink -f "${BASH_SOURCE[0]:-$0}")
 
@@ -108,7 +108,6 @@ detect_distro() {
 
 check_deps() {
     local missing_deps=()
-    # Added speedtest-cli to requirements
     for cmd in whiptail curl jq neofetch speedtest-cli; do
         if ! command -v "$cmd" &> /dev/null; then
             missing_deps+=("$cmd")
@@ -154,6 +153,13 @@ run_pkg_cmd() {
                 arch|manjaro) sudo pacman -S --noconfirm "$target" ;;
             esac
             ;;
+        remove)
+            case $DISTRO in
+                ubuntu|debian|kali|pop|linuxmint) sudo apt-get purge -y "$target" && sudo apt-get autoremove -y ;;
+                fedora|rhel|centos) sudo dnf remove -y "$target" && sudo dnf autoremove -y ;;
+                arch|manjaro) sudo pacman -Rs --noconfirm "$target" ;;
+            esac
+            ;;
         search)
             case $DISTRO in
                 ubuntu|debian|kali|pop|linuxmint) apt-cache show "$target" &>/dev/null ;;
@@ -171,6 +177,13 @@ run_pkg_cmd() {
                 [ ! -L /snap ] && sudo ln -s /var/lib/snapd/snap /snap 2>/dev/null
             fi
             [[ "$target" == "code" || "$target" == "discord" || "$target" == "spotify" || "$target" == "micro" ]] && sudo snap install "$target" --classic || sudo snap install "$target"
+            ;;
+        snap-remove)
+            sudo snap remove "$target"
+            ;;
+        flatpak-remove)
+            sudo flatpak uninstall -y "$target"
+            sudo flatpak uninstall --unused -y
             ;;
     esac
 }
@@ -213,11 +226,13 @@ install_hello_shortcut() {
 
 system_doctor() {
     local task
-    task=$(whiptail --title "System Doctor" --menu "Diagnostic tools:" 18 70 7 \
+    task=$(whiptail --title "System Doctor" --menu "Diagnostic tools:" 18 70 9 \
         "Speed Test" "Check Internet Download/Upload speeds" \
         "Check Internet" "Test your connection status (Ping)" \
         "Clean Disk" "Remove temporary files" \
-        "Fix Packages" "Fix broken installs (Ubuntu/Debian)" \
+        "Clean Orphan Packages" "Deep sweep for all unused system dependencies" \
+        "Clear System Logs" "Clear old systemd journal logs (Save GBs!)" \
+        "Fix Packages" "Repair broken installs or stale database locks" \
         "Restart Audio" "Fix sound issues (PulseAudio/Pipewire)" \
         "Restart Bluetooth" "Reset the Bluetooth service" \
         "Back" "Return to main menu" 3>&1 1>&2 2>&3)
@@ -230,29 +245,47 @@ system_doctor() {
             echo -e "${BOLD}${CYAN}========================================================${NC}"
             echo -e "${YELLOW} Connecting to the nearest server...${NC}"
             echo ""
-            
-            # Using speedtest-cli --simple for cleaner parsing
             local result=$(speedtest-cli --simple)
-            
             if [ -z "$result" ]; then
                 echo -e "${RED}[!] Speed test failed. Check your connection.${NC}"
             else
                 local ping=$(echo "$result" | grep "Ping" | awk '{print $2}')
                 local down=$(echo "$result" | grep "Download" | awk '{print $2}')
                 local up=$(echo "$result" | grep "Upload" | awk '{print $2}')
-                
                 echo -e " ${BOLD}Ping:${NC}      ${CYAN}$ping ms${NC}"
                 echo -e " ${BOLD}Download:${NC}  ${BOLD}${GREEN}$down Mbit/s${NC}"
                 echo -e " ${BOLD}Upload:${NC}    ${BOLD}${BLUE}$up Mbit/s${NC}"
             fi
-            
             echo ""
-            echo -e "${BOLD}${CYAN}========================================================${NC}"
-            read -p "Press [Enter] to return..."
-            ;;
+            read -p "Press [Enter] to return..." ;;
         "Check Internet") ping -c 3 8.8.8.8 >/dev/null 2>&1 && msg_box "Status" "ONLINE" || msg_box "Status" "OFFLINE" ;;
         "Clean Disk") run_pkg_cmd clean && msg_box "Success" "Caches cleared." ;;
-        "Fix Packages") sudo dpkg --configure -a && sudo apt-get install -f && msg_box "Done" "Fix attempt finished." ;;
+        "Clean Orphan Packages")
+            echo -e "${YELLOW}Hunting for orphans...${NC}"
+            run_pkg_cmd clean
+            msg_box "Sweep Complete" "Unused dependencies have been removed." ;;
+        "Clear System Logs")
+            sudo journalctl --vacuum-time=1s
+            msg_box "Logs Cleared" "Old system logs have been removed." ;;
+        "Fix Packages")
+            echo -e "${YELLOW}Attempting to repair package system for $DISTRO...${NC}"
+            case $DISTRO in
+                ubuntu|debian|kali|pop|linuxmint)
+                    sudo dpkg --configure -a && sudo apt-get install -f
+                    ;;
+                arch|manjaro)
+                    # Common Arch fix: Remove stale lock and sync
+                    [ -f /var/lib/pacman/db.lck ] && sudo rm -f /var/lib/pacman/db.lck
+                    sudo pacman -Syyu --noconfirm
+                    ;;
+                fedora|rhel|centos)
+                    sudo dnf clean all && sudo dnf check
+                    ;;
+                *)
+                    echo -e "${RED}Distro not explicitly supported for automated repair.${NC}"
+                    ;;
+            esac
+            msg_box "Done" "Fix attempt finished for $DISTRO." ;;
         "Restart Audio") systemctl --user restart pulseaudio || systemctl --user restart pipewire && msg_box "Audio" "Sound services restarted." ;;
         "Restart Bluetooth") sudo systemctl restart bluetooth && msg_box "Bluetooth" "Bluetooth service reset." ;;
     esac
@@ -317,6 +350,79 @@ power_tools() {
     esac
 }
 
+uninstaller_utility() {
+    local query
+    query=$(whiptail --title "App Uninstaller" --inputbox "Type the name of the app to search and remove:" 10 60 3>&1 1>&2 2>&3)
+    [ -z "$query" ] && return
+
+    echo -e "${YELLOW}Searching for installed packages matching '$query'...${NC}"
+    
+    local list=()
+    # Search Native
+    case $DISTRO in
+        ubuntu|debian|kali|pop|linuxmint) 
+            while read -r pkg; do list+=("$pkg" "[Native]"); done < <(dpkg-query -W -f='${Package}\n' "*$query*" 2>/dev/null) ;;
+        fedora|rhel|centos) 
+            while read -r pkg; do list+=("$pkg" "[Native]"); done < <(rpm -qa --queryformat '%{NAME}\n' "*$query*" 2>/dev/null) ;;
+        arch|manjaro) 
+            while read -r pkg; do list+=("$pkg" "[Native]"); done < <(pacman -Qq | grep "$query") ;;
+    esac
+    
+    # Search Snaps
+    if command -v snap &> /dev/null; then
+        while read -r pkg; do list+=("$pkg" "[Snap]"); done < <(snap list | awk 'NR>1 {print $1}' | grep -i "$query")
+    fi
+
+    # Search Flatpaks
+    if command -v flatpak &> /dev/null; then
+        while read -r pkg; do list+=("$pkg" "[Flatpak]"); done < <(flatpak list --columns=application | grep -i "$query")
+    fi
+
+    if [ ${#list[@]} -eq 0 ]; then
+        msg_box "Not Found" "No installed packages found matching '$query'."
+        return
+    fi
+
+    local choice
+    choice=$(whiptail --title "Uninstall Selection" --menu "Choose an item to remove:" 20 70 10 "${list[@]}" 3>&1 1>&2 2>&3)
+    
+    if [ -n "$choice" ]; then
+        local type=""
+        for ((i=0; i<${#list[@]}; i+=2)); do
+            if [[ "${list[i]}" == "$choice" ]]; then type="${list[i+1]}"; break; fi
+        done
+
+        if whiptail --title "Confirm" --yesno "Are you sure you want to remove $choice ($type)?" 10 60; then
+            clear
+            if [[ "$type" == "[Snap]" ]]; then
+                run_pkg_cmd snap-remove "$choice"
+            elif [[ "$type" == "[Flatpak]" ]]; then
+                run_pkg_cmd flatpak-remove "$choice"
+            else
+                run_pkg_cmd remove "$choice"
+            fi
+            
+            # Deep Clean Prompt
+            if whiptail --title "Deep Clean" --yesno "Would you like to search for and remove leftover configuration files in your Home folder?" 10 65; then
+                echo -e "${YELLOW}Hunting for leftover configuration folders...${NC}"
+                # Search for hidden config directories matching the app name
+                local config_found=$(find "$HOME" -maxdepth 3 -name ".*$choice*" -type d 2>/dev/null)
+                if [ -n "$config_found" ]; then
+                    echo -e "Found: $config_found"
+                    if whiptail --title "Confirm Delete" --yesno "Delete these folders?\n$config_found" 12 65; then
+                        rm -rf $config_found
+                        msg_box "Deep Clean Complete" "Leftover data removed."
+                    fi
+                else
+                    msg_box "Clean" "No leftover config folders found."
+                fi
+            fi
+            
+            msg_box "Removed" "$choice has been uninstalled."
+        fi
+    fi
+}
+
 custom_install() {
     local target
     target=$(whiptail --title "Custom App Search" --inputbox "Type app name:" 10 60 3>&1 1>&2 2>&3)
@@ -329,8 +435,9 @@ custom_install() {
 
 app_store() {
     local APP
-    APP=$(whiptail --title "App Store" --menu "Choose an app:" 20 82 14 \
+    APP=$(whiptail --title "App Store" --menu "Software Management:" 20 82 14 \
         "SEARCH" "[ NEW ] Search & Install Any Custom App" \
+        "UNINSTALL" "[ NEW ] Smart Uninstaller (Native, Snap & Flatpak)" \
         "ncdu" "TUI: Interactive disk usage analyzer" \
         "ranger" "TUI: Advanced terminal file manager" \
         "micro" "TUI: Modern text editor" \
@@ -343,11 +450,11 @@ app_store() {
         "code" "Snap: VS Code" \
         "spotify" "Snap: Spotify" \
         "discord" "Snap: Discord" \
-        "vlc" "App: VLC Player" \
         "Back" "Return to main menu" 3>&1 1>&2 2>&3)
 
     case $APP in
         "SEARCH") custom_install ;;
+        "UNINSTALL") uninstaller_utility ;;
         "Back"|"") return ;;
         *) 
             clear
@@ -370,7 +477,7 @@ while true; do
         "3" "Power Tools (SSH, Git, Visual Search)" \
         "4" "System Information Suite (IP, Disk, OS)" \
         "5" "Ask AI Assistant (English to Bash)" \
-        "6" "App Store (TUI, Apps & Snaps)" \
+        "6" "App Store & Smart Uninstaller" \
         "7" "Install/Fix 'hello' Shortcut" \
         "8" "Quick System Summary (Neofetch)" \
         "9" "Uninstall Linux Buddy" \
