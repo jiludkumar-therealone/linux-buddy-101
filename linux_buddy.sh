@@ -25,11 +25,11 @@ trap 'kill $SUDO_PID 2>/dev/null' EXIT
 
 # --- 1. Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.5.5-alpha"
+VERSION="0.5.7-alpha"
 CONFIG_DIR="$HOME/.config/linux-buddy"
 CONFIG_FILE="$CONFIG_DIR/config"
 
-# Robust path detection (Works even with underscores or the occasional space)
+# Robust path detection
 raw_path="${BASH_SOURCE[0]:-$0}"
 SCRIPT_PATH=$(readlink -f "$raw_path")
 
@@ -139,7 +139,7 @@ install_hello_shortcut() {
     cp "$shell_rc" "${shell_rc}.bak"
     grep -v "hello" "${shell_rc}.bak" > "$shell_rc"
 
-    # Save as a Function (Most robust method)
+    # Save as a Function
     echo "" >> "$shell_rc"
     echo "# Linux Buddy Shortcut" >> "$shell_rc"
     echo "hello() { \"$SCRIPT_PATH\" \"\$@\"; }" >> "$shell_rc"
@@ -188,14 +188,23 @@ system_doctor() {
 
 app_store() {
     local APP
-    APP=$(whiptail --title "App Store" --menu "Choose an app to install:" 16 65 5 \
-        "vlc" "Universal Media Player" \
-        "git" "Version Control System" \
-        "htop" "Interactive Process Monitor" \
-        "btop" "Modern Resource Monitor" \
+    APP=$(whiptail --title "App Store" --menu "Choose an app to install:" 20 75 12 \
+        "vlc" "Multimedia: Universal Media Player" \
+        "git" "Dev: Version Control System" \
+        "htop" "System: Interactive Process Monitor" \
+        "btop" "System: Modern Resource Monitor" \
+        "tree" "Utilities: Visual Directory Structure" \
+        "vim" "Editors: Advanced Text Editor" \
+        "nano" "Editors: Simple Text Editor" \
+        "gimp" "Graphics: Image Manipulation Program" \
+        "firefox" "Web: Modern Browser" \
+        "chromium" "Web: Open-source Chrome Alternative" \
+        "python3" "Dev: Python Programming Language" \
+        "docker" "Dev: Containerization Platform" \
         "Back" "Return to main menu" 3>&1 1>&2 2>&3)
 
     if [ "$APP" != "Back" ] && [ -n "$APP" ]; then
+        echo "Installing $APP... Please wait."
         run_pkg_cmd install "$APP"
         msg_box "Complete" "$APP task finished."
     fi
