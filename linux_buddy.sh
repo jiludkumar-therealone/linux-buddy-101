@@ -34,7 +34,7 @@ trap 'kill $SUDO_PID 2>/dev/null' EXIT
 
 # --- 1. Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.9.1-alpha" 
+VERSION="0.9.2-alpha" 
 CONFIG_DIR="$HOME/.config/linux-buddy"
 SCRIPT_PATH=$(readlink -f "${BASH_SOURCE[0]:-$0}")
 
@@ -402,19 +402,35 @@ uninstaller_utility() {
                 run_pkg_cmd remove "$choice"
             fi
             
-            # Deep Clean Prompt
-            if whiptail --title "Deep Clean" --yesno "Would you like to search for and remove leftover configuration files in your Home folder?" 10 65; then
-                echo -e "${YELLOW}Hunting for leftover configuration folders...${NC}"
-                # Search for hidden config directories matching the app name
-                local config_found=$(find "$HOME" -maxdepth 3 -name ".*$choice*" -type d 2>/dev/null)
-                if [ -n "$config_found" ]; then
-                    echo -e "Found: $config_found"
-                    if whiptail --title "Confirm Delete" --yesno "Delete these folders?\n$config_found" 12 65; then
-                        rm -rf $config_found
-                        msg_box "Deep Clean Complete" "Leftover data removed."
+            # Layered Safety Deep Clean Prompt
+            # Layer 1: Guard against generic or core-system names
+            if [[ ${#choice} -lt 3 || "$choice" =~ ^(bin|etc|lib|var|usr|sys|root|home|boot|dev)$ ]]; then
+                msg_box "Deep Clean Skipped" "The app name '$choice' is too generic or matches core system paths. Skipping deep clean for safety."
+            else
+                if whiptail --title "Deep Clean" --yesno "Would you like to search for and remove leftover configuration files in your Home folder?" 10 65; then
+                    echo -e "${YELLOW}Hunting for leftover configuration folders...${NC}"
+                    
+                    # Layer 2: Targeted Search in specific non-critical hidden folders
+                    local scan_targets=("$HOME/.config" "$HOME/.local/share" "$HOME/.cache")
+                    local config_found=""
+                    for target in "${scan_targets[@]}"; do
+                        if [ -d "$target" ]; then
+                            # Find hidden folders specifically matching the app name within standard locations
+                            local match=$(find "$target" -maxdepth 2 -name "*$choice*" -type d 2>/dev/null)
+                            [ -n "$match" ] && config_found+="$match"$'\n'
+                        fi
+                    done
+
+                    if [ -n "$config_found" ]; then
+                        # Layer 3: Final User Verification
+                        if whiptail --title "Confirm Delete" --yesno "Found these leftover folders. Delete them?\n\n$config_found" 15 70; then
+                            # Sudo is NOT used here for home directory deletion to prevent accidentally touching system files
+                            echo "$config_found" | xargs rm -rf
+                            msg_box "Deep Clean Complete" "Leftover data removed safely."
+                        fi
+                    else
+                        msg_box "Clean" "No leftover config folders found in standard locations."
                     fi
-                else
-                    msg_box "Clean" "No leftover config folders found."
                 fi
             fi
             
