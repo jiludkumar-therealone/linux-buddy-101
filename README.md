@@ -1,61 +1,61 @@
 # Linux Buddy 🐧
 
-The ultimate Terminal User Interface TUI tool for beginners.  
-It feels like autocorrect for the terminal. It helps you run commands, update your system, and learn in a simple interactive menu.
+Linux Buddy is a universal Terminal User Interface powerhouse for beginners.  
+It helps with real time system monitoring, AI troubleshooting, and app management, so you can use Linux with confidence.
 
 ---
 
 ## 🚀 Quick Start
 
-Run Linux Buddy without installing it
-
+You can run Linux Buddy directly without installation.
 ```bash
-curl -sSL https://raw.githubusercontent.com/jiludkumar-therealone/linux-buddy-101/main/linux_buddy.sh | bash
+curl -sSL [https://raw.githubusercontent.com/jiludkumar-therealone/linux-buddy-101/main/linux_buddy.sh](https://raw.githubusercontent.com/jiludkumar-therealone/linux-buddy-101/main/linux_buddy.sh) | bash
 ```
-
 ---
 
-## ✨ Features
+## ✨ Core Features
 
-* **Distro Independent**  
-  Works on Ubuntu or Debian, Fedora, Arch, and OpenSUSE
+* **📊 Buddy Dashboard**  
+  Real time monitoring of CPU, RAM usage, and connection stability.
 
-* **The hello Shortcut**  
-  Install a shortcut to open the app fast
+* **🏥 System Doctor**  
+  Fix common problems like Windows and Linux time sync issues, frozen UIs, and audio glitches.
 
-* **AI Integration BETA**  
-  Ask normal questions and get suggested Linux commands powered by Gemini
+* **🛡️ Universal Uninstaller**  
+  Smart detection and deep cleaning for Native, Snap, and Flatpak applications.
 
-* **One Click Uninstall**  
-  Remove everything clean
+* **🧠 AI Assistant**  
+  Ask questions in simple English and get suggested Linux commands powered by Gemini.
+
+* **🌍 Distro Specific Tools**  
+  Special optimizations for Fedora, Arch, and Ubuntu based systems.
+
+* **⚡ Power Tools**  
+  Visual file search, automated SSH key generation, and GitHub identity setup.
+
+* **🏁 The hello Shortcut**  
+  Install a shortcut to launch Linux Buddy from anywhere.
 
 ---
 
 ## 🛠 Setup for Developers
 
 ### 1. Clone the repo
-
 ```bash
-# We specify linux_buddy at the end so the folder has no spaces
 git clone https://github.com/jiludkumar-therealone/linux-buddy-101.git linux_buddy
 cd linux_buddy
 ```
 
 ### 2. Make it executable
-
 ```bash
 chmod +x linux_buddy.sh
 ```
-
 ### 3. Run it
-
 ```bash
 ./linux_buddy.sh
 ```
-
 ---
 
 ## 📜 License
-
 MIT
 
