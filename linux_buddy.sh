@@ -25,7 +25,7 @@ trap 'kill $SUDO_PID 2>/dev/null' EXIT
 
 # --- 1. Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.5.7-alpha"
+VERSION="0.6.0-alpha"
 CONFIG_DIR="$HOME/.config/linux-buddy"
 CONFIG_FILE="$CONFIG_DIR/config"
 
@@ -70,27 +70,53 @@ check_deps() {
 
 run_pkg_cmd() {
     local action=$1
-    case $DISTRO in
-        ubuntu|debian|kali|pop|linuxmint)
-            case $action in
-                update)  sudo apt-get update && sudo apt-get dist-upgrade -y ;;
-                clean)   sudo apt-get autoremove -y && sudo apt-get clean ;;
-                install) sudo apt-get install -y "${@:2}" ;;
+    local target=$2
+    
+    case $action in
+        update|upgrade)
+            case $DISTRO in
+                ubuntu|debian|kali|pop|linuxmint) sudo apt-get update && sudo apt-get dist-upgrade -y ;;
+                fedora|rhel|centos) sudo dnf upgrade -y ;;
+                arch|manjaro) sudo pacman -Syu --noconfirm ;;
             esac
             ;;
-        fedora|rhel|centos)
-            case $action in
-                update)  sudo dnf upgrade -y ;;
-                clean)   sudo dnf autoremove -y ;;
-                install) sudo dnf install -y "${@:2}" ;;
+        clean)
+            case $DISTRO in
+                ubuntu|debian|kali|pop|linuxmint) sudo apt-get autoremove -y && sudo apt-get clean ;;
+                fedora|rhel|centos) sudo dnf autoremove -y ;;
+                arch|manjaro) sudo pacman -Sc --noconfirm ;;
             esac
             ;;
-        arch|manjaro)
-            case $action in
-                update)  sudo pacman -Syu --noconfirm ;;
-                clean)   sudo pacman -Sc --noconfirm ;;
-                install) sudo pacman -S --noconfirm "${@:2}" ;;
+        install)
+            case $DISTRO in
+                ubuntu|debian|kali|pop|linuxmint) sudo apt-get install -y "$target" ;;
+                fedora|rhel|centos) sudo dnf install -y "$target" ;;
+                arch|manjaro) sudo pacman -S --noconfirm "$target" ;;
             esac
+            ;;
+        search)
+            case $DISTRO in
+                ubuntu|debian|kali|pop|linuxmint) apt-cache show "$target" &>/dev/null ;;
+                fedora|rhel|centos) dnf list "$target" &>/dev/null ;;
+                arch|manjaro) pacman -Si "$target" &>/dev/null ;;
+            esac
+            ;;
+        snap)
+            if ! command -v snap &> /dev/null; then
+                echo "Snap not found. Installing snapd..."
+                case $DISTRO in
+                    ubuntu|debian|kali|pop|linuxmint) sudo apt-get install -y snapd ;;
+                    fedora|rhel|centos) sudo dnf install -y snapd ;;
+                    arch|manjaro) sudo pacman -S --noconfirm snapd && sudo systemctl enable --now snapd.socket ;;
+                esac
+                [ ! -L /snap ] && sudo ln -s /var/lib/snapd/snap /snap 2>/dev/null
+            fi
+            
+            if [[ "$target" == "code" || "$target" == "discord" || "$target" == "spotify" || "$target" == "micro" ]]; then
+                sudo snap install "$target" --classic
+            else
+                sudo snap install "$target"
+            fi
             ;;
     esac
 }
@@ -131,21 +157,17 @@ ask_ai() {
 install_hello_shortcut() {
     local shell_rc=""
     local source_cmd=""
-    
     [[ "$SHELL" == *"zsh"* ]] && shell_rc="$HOME/.zshrc" || shell_rc="$HOME/.bashrc"
     source_cmd="source $shell_rc"
 
-    # Scrub old entries to avoid conflicts
     cp "$shell_rc" "${shell_rc}.bak"
     grep -v "hello" "${shell_rc}.bak" > "$shell_rc"
-
-    # Save as a Function
     echo "" >> "$shell_rc"
     echo "# Linux Buddy Shortcut" >> "$shell_rc"
     echo "hello() { \"$SCRIPT_PATH\" \"\$@\"; }" >> "$shell_rc"
     
     whiptail --title "Shortcut Installed" --inputbox \
-    "I've linked 'hello' to your script. Copy (Ctrl+C) and run this to finish activation:" \
+    "Linked 'hello' to script. Copy (Ctrl+C) and run this to finish:" \
     12 70 "$source_cmd" 3>&1 1>&2 2>&3
 }
 
@@ -160,7 +182,7 @@ uninstall_buddy() {
 
 system_doctor() {
     local task
-    task=$(whiptail --title "System Doctor" --menu "Select a diagnostic task:" 16 70 5 \
+    task=$(whiptail --title "System Doctor" --menu "Diagnostic tools:" 16 70 5 \
         "Check Internet" "Test your connection status" \
         "Clean Disk" "Remove temporary files" \
         "Fix Packages" "Fix broken installs (Ubuntu/Debian)" \
@@ -186,28 +208,90 @@ system_doctor() {
     esac
 }
 
-app_store() {
-    local APP
-    APP=$(whiptail --title "App Store" --menu "Choose an app to install:" 20 75 12 \
-        "vlc" "Multimedia: Universal Media Player" \
-        "git" "Dev: Version Control System" \
-        "htop" "System: Interactive Process Monitor" \
-        "btop" "System: Modern Resource Monitor" \
-        "tree" "Utilities: Visual Directory Structure" \
-        "vim" "Editors: Advanced Text Editor" \
-        "nano" "Editors: Simple Text Editor" \
-        "gimp" "Graphics: Image Manipulation Program" \
-        "firefox" "Web: Modern Browser" \
-        "chromium" "Web: Open-source Chrome Alternative" \
-        "python3" "Dev: Python Programming Language" \
-        "docker" "Dev: Containerization Platform" \
+system_info_suite() {
+    local task
+    task=$(whiptail --title "System Information" --menu "What would you like to check?" 16 70 5 \
+        "Disk Usage" "Detailed breakdown of storage" \
+        "Network Info" "Local and Public IP addresses" \
+        "Kernel & OS" "Detailed versioning information" \
+        "Running Services" "List active system services" \
         "Back" "Return to main menu" 3>&1 1>&2 2>&3)
 
-    if [ "$APP" != "Back" ] && [ -n "$APP" ]; then
-        echo "Installing $APP... Please wait."
-        run_pkg_cmd install "$APP"
-        msg_box "Complete" "$APP task finished."
+    case $task in
+        "Disk Usage")
+            local usage=$(df -h --total | grep 'total')
+            local root_free=$(df -h / | awk 'NR==2 {print $4}')
+            msg_box "Disk Stats" "Total Usage: $usage\nFree space on Root (/): $root_free"
+            ;;
+        "Network Info")
+            local local_ip=$(hostname -I | awk '{print $1}')
+            local public_ip=$(curl -s ifconfig.me || echo "Unknown")
+            msg_box "Network Details" "Local IP: $local_ip\nPublic IP: $public_ip"
+            ;;
+        "Kernel & OS")
+            local kernel=$(uname -r)
+            local arch=$(uname -m)
+            msg_box "OS details" "Kernel Version: $kernel\nArchitecture: $arch\nDistro ID: $DISTRO"
+            ;;
+        "Running Services")
+            clear
+            echo "Top 10 Active Services (Systemd):"
+            echo "--------------------------------"
+            systemctl list-units --type=service --state=running | head -n 12
+            read -p "Press Enter to return..."
+            ;;
+    esac
+}
+
+custom_install() {
+    local target
+    target=$(whiptail --title "Custom App Search" --inputbox "Type the name of the app you want to install:" 10 60 3>&1 1>&2 2>&3)
+    
+    if [ -n "$target" ]; then
+        echo "Searching for '$target' in your repositories..."
+        if run_pkg_cmd search "$target"; then
+            if whiptail --title "App Found" --yesno "I found '$target'. Would you like to install it now?" 10 60; then
+                run_pkg_cmd install "$target"
+                msg_box "Success" "$target has been installed!"
+            fi
+        else
+            msg_box "Not Found" "I couldn't find '$target' in your repositories. Check the spelling or try another name."
+        fi
     fi
+}
+
+app_store() {
+    local APP
+    APP=$(whiptail --title "App Store" --menu "Choose an app to install:" 20 82 14 \
+        "SEARCH" "[ NEW ] Search & Install Any Custom App" \
+        "ncdu" "TUI: Interactive disk usage analyzer" \
+        "ranger" "TUI: Advanced terminal file manager" \
+        "micro" "TUI: Modern, intuitive text editor" \
+        "glances" "TUI: Comprehensive system monitor" \
+        "htop" "TUI: Classic process monitor" \
+        "git" "Dev: Version Control System" \
+        "docker" "Dev: Containerization Platform" \
+        "python3" "Dev: Python Language Environment" \
+        "code" "Snap: Visual Studio Code" \
+        "spotify" "Snap: Music Streaming Client" \
+        "discord" "Snap: Communication Platform" \
+        "vlc" "App: Universal Media Player" \
+        "firefox" "Web: Modern Browser" \
+        "Back" "Return to main menu" 3>&1 1>&2 2>&3)
+
+    case $APP in
+        "SEARCH") custom_install ;;
+        "Back"|"") return ;;
+        *)
+            clear
+            if [[ "$APP" == "code" || "$APP" == "spotify" || "$APP" == "discord" ]]; then
+                run_pkg_cmd snap "$APP"
+            else
+                run_pkg_cmd install "$APP"
+            fi
+            msg_box "Complete" "Installation for $APP finished."
+            ;;
+    esac
 }
 
 msg_box() { whiptail --title "$1" --msgbox "$2" 14 70; }
@@ -217,25 +301,27 @@ detect_distro
 check_deps
 
 while true; do
-    CHOICE=$(whiptail --title "$APP_NAME v$VERSION ($DISTRO)" --menu "Main Menu" 18 75 8 \
+    CHOICE=$(whiptail --title "$APP_NAME v$VERSION ($DISTRO)" --menu "Main Menu" 20 78 10 \
         "1" "System Maintenance (Update & Upgrade)" \
         "2" "System Doctor (Fix & Check Health)" \
-        "3" "Ask AI Assistant (English to Bash)" \
-        "4" "App Store (Install Popular Apps)" \
-        "5" "Install/Fix 'hello' Shortcut" \
-        "6" "Quick System Summary (Neofetch)" \
-        "7" "Uninstall Linux Buddy" \
-        "8" "Exit" 3>&1 1>&2 2>&3)
+        "3" "System Information Suite (IP, Disk, OS)" \
+        "4" "Ask AI Assistant (English to Bash)" \
+        "5" "App Store (TUI, Apps & Snaps)" \
+        "6" "Install/Fix 'hello' Shortcut" \
+        "7" "Quick System Summary (Neofetch)" \
+        "8" "Uninstall Linux Buddy" \
+        "9" "Exit" 3>&1 1>&2 2>&3)
 
     case $CHOICE in
         1) run_pkg_cmd update && msg_box "Success" "System updated!" ;;
         2) system_doctor ;;
-        3) ask_ai ;;
-        4) app_store ;;
-        5) install_hello_shortcut ;;
-        6) clear; neofetch; echo ""; read -p "Press Enter to return to menu..." ;;
-        7) uninstall_buddy ;;
-        8) exit 0 ;;
+        3) system_info_suite ;;
+        4) ask_ai ;;
+        5) app_store ;;
+        6) install_hello_shortcut ;;
+        7) clear; neofetch; echo ""; read -p "Press Enter to return to menu..." ;;
+        8) uninstall_buddy ;;
+        9) exit 0 ;;
         *) exit 0 ;;
     esac
 done
