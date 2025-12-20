@@ -1,19 +1,28 @@
 #!/usr/bin/env bash
 
 # --- 0. TERMINAL-FIRST AUTHENTICATION ---
+# Colors for the terminal
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+MAGENTA='\033[0;35m'
+BLUE='\033[0;34m'
+NC='\033[0m' 
+BOLD='\033[1m'
+
 if ! sudo -n true 2>/dev/null; then
     clear
-    echo "========================================================"
-    echo "                LINUX BUDDY: ADMIN ACCESS               "
-    echo "========================================================"
-    echo " To manage your system and apps, I need your password.  "
+    echo -e "${BOLD}${CYAN}========================================================${NC}"
+    echo -e "${BOLD}${CYAN}                LINUX BUDDY: ADMIN ACCESS               ${NC}"
+    echo -e "${BOLD}${CYAN}========================================================${NC}"
+    echo -e " To manage your system and apps, I need your password.  "
     echo ""
     if ! sudo -v; then
-        echo ""
-        echo " [!] Authentication failed. Exiting."
+        echo -e "\n ${RED}[!] Authentication failed. Exiting.${NC}"
         exit 1
     fi
-    echo " [+] Success! Loading menu..."
+    echo -e " ${GREEN}[+] Success! Loading menu...${NC}"
     sleep 0.5
     clear
 fi
@@ -25,21 +34,13 @@ trap 'kill $SUDO_PID 2>/dev/null' EXIT
 
 # --- 1. Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.8.6-alpha" 
+VERSION="0.8.8-alpha" 
 CONFIG_DIR="$HOME/.config/linux-buddy"
 SCRIPT_PATH=$(readlink -f "${BASH_SOURCE[0]:-$0}")
 
 mkdir -p "$CONFIG_DIR"
 
 # --- 2. Internal Helpers (Visuals & Logic) ---
-
-# Colors for the visual search
-CYAN='\033[0;36m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m' 
-BOLD='\033[1m'
 
 spinner() {
     local pid=$1
@@ -66,16 +67,11 @@ visual_search() {
     echo -e " ${RED}Press Ctrl+C to cancel search anytime.${NC}"
     echo ""
 
-    # Run in subshell to isolate the search process
     (
         TMP_RESULTS=$(mktemp)
-        # Background the find command
         sudo find / -iname "*$query*" 2>/dev/null | head -n 30 > "$TMP_RESULTS" &
         FIND_PID=$!
-
-        # Local trap for Ctrl+C inside search
         trap "kill $FIND_PID 2>/dev/null; echo -e '\n${RED}[!] Search Interrupted.${NC}'; return" INT
-        
         spinner $FIND_PID "$query"
 
         if [ ! -s "$TMP_RESULTS" ]; then
@@ -112,14 +108,15 @@ detect_distro() {
 
 check_deps() {
     local missing_deps=()
-    for cmd in whiptail curl jq neofetch; do
+    # Added speedtest-cli to requirements
+    for cmd in whiptail curl jq neofetch speedtest-cli; do
         if ! command -v "$cmd" &> /dev/null; then
             missing_deps+=("$cmd")
         fi
     done
 
     if [ ${#missing_deps[@]} -gt 0 ]; then
-        echo "Setting up dependencies: ${missing_deps[*]}..."
+        echo -e "${YELLOW}Setting up dependencies: ${missing_deps[*]}...${NC}"
         case $DISTRO in
             ubuntu|debian|kali|pop|linuxmint)
                 sudo apt-get update && sudo apt-get install -y "${missing_deps[@]}" ;;
@@ -195,7 +192,7 @@ ask_ai() {
     local user_query
     user_query=$(whiptail --title "AI Assistant" --inputbox "What would you like to do in Linux?" 10 70 3>&1 1>&2 2>&3)
     [ -z "$user_query" ] && return
-    echo "Consulting the AI brain..."
+    echo -e "${MAGENTA}Consulting the AI brain...${NC}"
     local response
     response=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}" \
         -H 'Content-Type: application/json' \
@@ -216,8 +213,9 @@ install_hello_shortcut() {
 
 system_doctor() {
     local task
-    task=$(whiptail --title "System Doctor" --menu "Diagnostic tools:" 16 70 6 \
-        "Check Internet" "Test your connection status" \
+    task=$(whiptail --title "System Doctor" --menu "Diagnostic tools:" 18 70 7 \
+        "Speed Test" "Check Internet Download/Upload speeds" \
+        "Check Internet" "Test your connection status (Ping)" \
         "Clean Disk" "Remove temporary files" \
         "Fix Packages" "Fix broken installs (Ubuntu/Debian)" \
         "Restart Audio" "Fix sound issues (PulseAudio/Pipewire)" \
@@ -225,6 +223,33 @@ system_doctor() {
         "Back" "Return to main menu" 3>&1 1>&2 2>&3)
 
     case $task in
+        "Speed Test")
+            clear
+            echo -e "${BOLD}${CYAN}========================================================${NC}"
+            echo -e "${BOLD}${CYAN}               INTERNET SPEED TEST (BETA)               ${NC}"
+            echo -e "${BOLD}${CYAN}========================================================${NC}"
+            echo -e "${YELLOW} Connecting to the nearest server...${NC}"
+            echo ""
+            
+            # Using speedtest-cli --simple for cleaner parsing
+            local result=$(speedtest-cli --simple)
+            
+            if [ -z "$result" ]; then
+                echo -e "${RED}[!] Speed test failed. Check your connection.${NC}"
+            else
+                local ping=$(echo "$result" | grep "Ping" | awk '{print $2}')
+                local down=$(echo "$result" | grep "Download" | awk '{print $2}')
+                local up=$(echo "$result" | grep "Upload" | awk '{print $2}')
+                
+                echo -e " ${BOLD}Ping:${NC}      ${CYAN}$ping ms${NC}"
+                echo -e " ${BOLD}Download:${NC}  ${BOLD}${GREEN}$down Mbit/s${NC}"
+                echo -e " ${BOLD}Upload:${NC}    ${BOLD}${BLUE}$up Mbit/s${NC}"
+            fi
+            
+            echo ""
+            echo -e "${BOLD}${CYAN}========================================================${NC}"
+            read -p "Press [Enter] to return..."
+            ;;
         "Check Internet") ping -c 3 8.8.8.8 >/dev/null 2>&1 && msg_box "Status" "ONLINE" || msg_box "Status" "OFFLINE" ;;
         "Clean Disk") run_pkg_cmd clean && msg_box "Success" "Caches cleared." ;;
         "Fix Packages") sudo dpkg --configure -a && sudo apt-get install -f && msg_box "Done" "Fix attempt finished." ;;
@@ -246,7 +271,14 @@ system_info_suite() {
         "Disk Usage") msg_box "Disk Stats" "$(df -h --total | grep 'total')\nFree on Root: $(df -h / | awk 'NR==2 {print $4}')" ;;
         "Network Info") msg_box "Network Details" "Local IP: $(hostname -I | awk '{print $1}')\nPublic IP: $(curl -s ifconfig.me || echo 'Unknown')" ;;
         "Kernel & OS") msg_box "OS details" "Kernel: $(uname -r)\nArch: $(uname -m)\nDistro: $DISTRO" ;;
-        "Running Services") clear; echo "Top Active Services:"; systemctl list-units --type=service --state=running | head -n 12; read -p "Press Enter to return..." ;;
+        "Running Services") 
+            clear
+            echo -e "${BOLD}${CYAN}--------------------------------------------------------${NC}"
+            echo -e " ${BOLD}Top Active Services (Systemd)${NC}"
+            echo -e "${BOLD}${CYAN}--------------------------------------------------------${NC}"
+            systemctl list-units --type=service --state=running | head -n 12
+            echo ""
+            read -p "Press [Enter] to return..." ;;
     esac
 }
 
@@ -266,7 +298,12 @@ power_tools() {
             query=$(whiptail --title "File Search" --inputbox "Enter a file or folder name to search for:" 10 60 3>&1 1>&2 2>&3)
             [ -n "$query" ] && visual_search "$query"
             ;;
-        "Find Huge Files") clear; echo "Searching for files > 100MB..."; find "$HOME" -type f -size +100M -exec ls -lh {} \; 2>/dev/null | awk '{ print $5, $9 }'; read -p "Press Enter..." ;;
+        "Find Huge Files") 
+            clear
+            echo -e "${BOLD}${YELLOW}Searching for files > 100MB in $HOME...${NC}"
+            find "$HOME" -type f -size +100M -exec ls -lh {} \; 2>/dev/null | awk '{ print $5, $9 }'
+            echo ""
+            read -p "Press [Enter] to return..." ;;
         "Setup GitHub Identity")
             local name=$(whiptail --inputbox "Enter Name:" 10 60 3>&1 1>&2 2>&3)
             local email=$(whiptail --inputbox "Enter Email:" 10 60 3>&1 1>&2 2>&3)
@@ -312,7 +349,11 @@ app_store() {
     case $APP in
         "SEARCH") custom_install ;;
         "Back"|"") return ;;
-        *) clear; [[ "$APP" == "code" || "$APP" == "spotify" || "$APP" == "discord" ]] && run_pkg_cmd snap "$APP" || run_pkg_cmd install "$APP"; msg_box "Complete" "Done." ;;
+        *) 
+            clear
+            echo -e "${YELLOW}Requesting installation for $APP...${NC}"
+            [[ "$APP" == "code" || "$APP" == "spotify" || "$APP" == "discord" ]] && run_pkg_cmd snap "$APP" || run_pkg_cmd install "$APP"
+            msg_box "Complete" "Done." ;;
     esac
 }
 
@@ -325,7 +366,7 @@ check_deps
 while true; do
     CHOICE=$(whiptail --title "$APP_NAME v$VERSION ($DISTRO)" --menu "Main Menu" 22 78 11 \
         "1" "System Maintenance (Update & Upgrade)" \
-        "2" "System Doctor (Fix Audio, BT, Internet)" \
+        "2" "System Doctor (Fix Audio, Speed Test, etc.)" \
         "3" "Power Tools (SSH, Git, Visual Search)" \
         "4" "System Information Suite (IP, Disk, OS)" \
         "5" "Ask AI Assistant (English to Bash)" \
@@ -336,15 +377,28 @@ while true; do
         "10" "Exit" 3>&1 1>&2 2>&3)
 
     case $CHOICE in
-        1) run_pkg_cmd update && msg_box "Success" "Updated!" ;;
+        1) 
+            echo -e "${YELLOW}Starting system maintenance...${NC}"
+            run_pkg_cmd update && msg_box "Success" "Updated!" ;;
         2) system_doctor ;;
         3) power_tools ;;
         4) system_info_suite ;;
         5) ask_ai ;;
         6) app_store ;;
         7) install_hello_shortcut ;;
-        8) clear; neofetch; echo ""; read -p "Press Enter to return..." ;;
-        9) whiptail --yesno "Remove everything?" 10 60 && rm -rf "$CONFIG_DIR" && sed -i '/hello/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null && exit 0 ;;
+        8) 
+            clear
+            echo -e "${BOLD}${CYAN}========================================================${NC}"
+            echo -e " ${BOLD}System Summary${NC}"
+            echo -e "${BOLD}${CYAN}========================================================${NC}"
+            neofetch; echo ""; read -p "Press [Enter] to return..." ;;
+        9) 
+            if whiptail --yesno "Remove everything?" 10 60; then 
+                rm -rf "$CONFIG_DIR"
+                sed -i '/hello/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
+                echo -e "${RED}Uninstalled Linux Buddy successfully.${NC}"
+                exit 0
+            fi ;;
         10) exit 0 ;;
         *) exit 0 ;;
     esac
