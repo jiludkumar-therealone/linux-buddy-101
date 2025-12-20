@@ -25,7 +25,7 @@ trap 'kill $SUDO_PID 2>/dev/null' EXIT
 
 # --- 1. Configuration & Setup ---
 APP_NAME="Linux Buddy"
-VERSION="0.6.0-alpha"
+VERSION="0.7.0-alpha" # UPDATED: Starting with Alpha for the first release!
 CONFIG_DIR="$HOME/.config/linux-buddy"
 CONFIG_FILE="$CONFIG_DIR/config"
 
@@ -269,6 +269,7 @@ app_store() {
         "micro" "TUI: Modern, intuitive text editor" \
         "glances" "TUI: Comprehensive system monitor" \
         "htop" "TUI: Classic process monitor" \
+        "btop" "TUI: Modern colorful system monitor" \
         "git" "Dev: Version Control System" \
         "docker" "Dev: Containerization Platform" \
         "python3" "Dev: Python Language Environment" \
