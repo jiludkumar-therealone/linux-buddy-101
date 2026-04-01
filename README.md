@@ -9,7 +9,7 @@ It helps with real time system monitoring, AI troubleshooting, and app managemen
 
 You can run Linux Buddy directly without installation.
 ```bash
-curl -sSL [https://raw.githubusercontent.com/jiludkumar-therealone/linux-buddy-101/main/linux_buddy.sh](https://raw.githubusercontent.com/jiludkumar-therealone/linux-buddy-101/main/linux_buddy.sh) | bash
+curl -sSL https://raw.githubusercontent.com/jiludkumar-therealone/linux-buddy-101/main/linux_buddy.sh | bash
 ```
 ---
 
